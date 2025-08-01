@@ -326,7 +326,6 @@ static void print_summary(void)
         LARGE_INTEGER qpc_now;
         QueryPerformanceCounter(&qpc_now);
         accumulate_interval(qpc_now.QuadPart);
-    } else {
     }
 
     // total timeline
@@ -435,7 +434,7 @@ static void print_usage(const wchar_t *prog_name)
     wprintf(L"  %ls <filename>         - Parse existing log file\n", prog_name);
     wprintf(L"  %ls -f <filename>      - Parse existing log file (explicit)\n", prog_name);
     wprintf(L"\nLive mode controls:\n");
-    wprintf(L"  F12      - Toggle recording on/off\n");
+    wprintf(L"  Alt+1      - Toggle recording on/off\n");
     wprintf(L"  Ctrl-C   - Show stats and exit\n");
 }
 
@@ -513,23 +512,41 @@ int wmain(int argc, wchar_t *argv[])
                                     GetModuleHandleW(NULL),
                                     0);
     if (!hHook) {
-        fwprintf(stderr, L"Failed to install hook\n");
-        fclose(g_log);
+        fwprintf(stderr, L"Failed to install keyboard hook\n");
+        if (g_log) {
+            fclose(g_log);
+            g_log = NULL;
+        }
         return 1;
     }
 
     // console ctrl-handler & atexit cleanup
-    SetConsoleCtrlHandler(ConsoleHandler, TRUE);
+    if (!SetConsoleCtrlHandler(ConsoleHandler, TRUE)) {
+        fwprintf(stderr, L"Failed to set console control handler\n");
+        if (g_log) {
+            fclose(g_log);
+            g_log = NULL;
+        }
+        UnhookWindowsHookEx(hHook);
+        return 1;
+    }
+    
     atexit(cleanup);
 
     // message loop
     MSG msg;
-    while (GetMessageW(&msg, NULL, 0, 0)) {
+    int result;
+    while ((result = GetMessageW(&msg, NULL, 0, 0)) > 0) {
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
 
-    // never reached – but keep the linker happy
+    // Check if GetMessage encountered an error
+    if (result < 0) {
+        fwprintf(stderr, L"Error in message loop\n");
+    }
+
+    // Cleanup hook before exit
     UnhookWindowsHookEx(hHook);
-    return 0;
+    return (result < 0) ? 1 : 0;
 }
